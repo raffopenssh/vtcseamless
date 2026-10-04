@@ -1,6 +1,6 @@
 // bevdirect — fetch Austrian cadastre for a bbox straight from BEV tiles.
 //
-//	bevdirect -bbox 15.08,47.04,15.10,47.06 -layers parcels,footprints -o out.json
+//	bevdirect -bbox W,S,E,N -layers parcels,footprints -o out.json
 //	bevdirect -bbox … -geojson > parcels.geojson
 package main
 

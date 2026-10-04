@@ -45,13 +45,13 @@ mp, guardTripped := vtcseamless.UnionPieces(pieces[id], sumOfPieceAreas)
 
 Go package `github.com/raffopenssh/vtcseamless/bevdirect` + CLI that
 assembles parcels / building footprints / land use for a bbox **directly from
-`kataster.bev.gv.at` vector tiles (CC BY 4.0)**. It serves as a provenance
+the BEV Katastralmappe vector tile cache (VTC, CC BY 4.0)**. It serves as a provenance
 proof (everything a client shows can be re-derived from the public tiles with
 this code) and as a self-hosted cadastre service for map clients. See
 [DEPLOY.md](DEPLOY.md) for running it as a systemd service.
 
 ```
-go run ./cmd/bevdirect -bbox 15.075,47.055,15.095,47.075 -layers parcels,footprints,landuse -cache ./bevcache -o vp.json
+go run ./cmd/bevdirect -bbox W,S,E,N -layers parcels,footprints,landuse -cache ./bevcache -o vp.json
 go run ./cmd/bevdirect -bbox … -geojson > out.geojson
 ```
 
@@ -62,7 +62,7 @@ res, err := bevdirect.Fetch(ctx, west, south, east, north, bevdirect.Options{
 // res.Notice must be displayed with the data („© BEV, 2026 … CC BY 4.0, bearbeitet“).
 ```
 
-## Measured (Köflach, one 0.02° × 0.02° viewport tile ≈ 1.5 × 2.2 km)
+## Measured (one dense small-town 0.02° × 0.02° viewport tile ≈ 1.5 × 2.2 km)
 
 | | tiles | bytes | cold | warm (disk cache) |
 |---|---|---|---|---|
@@ -73,7 +73,7 @@ res, err := bevdirect.Fetch(ctx, west, south, east, north, bevdirect.Options{
 landuse pieces. Compared with an independent assembly of the same BEV data
 for the same bbox: 2 484 ids in common, EZ agrees on all but 9, area agrees
 within ±2 % for ~93 %; the outliers were ring-0-only slivers on the reference
-side (e.g. 63332-338/3: reference 88 m², bevdirect 848 m² = real ring with
+side (one case: reference 88 m², bevdirect 848 m² = the real ring with its
 hole). bevdirect uses the guarded union for every KG.
 
 BEV serves `Cache-Control: no-cache`, 1.1–1.4 s per tile; parallelism (default
@@ -126,7 +126,7 @@ so the nearest cell finishes first. Enrichment clips land-use pieces to the
 parcel bbox before polyclip and runs parcels in parallel (1.4 s → 0.8 s per
 dense cell).
 
-Measured, initial load of 12 unaligned 0.02° tiles (4-wide, Köflach town
+Measured, initial load of 12 unaligned 0.02° tiles (4-wide, a dense town
 centre, 9 700 parcels), 2 cores:
 
 | | |
@@ -134,7 +134,7 @@ centre, 9 700 parcels), 2 cores:
 | cold (nothing cached, 9 cells) | 14–15 s total; first tile ~10 s; CPU-bound (polyclip) |
 | pan one tile after ~10 s (prefetched ring) | 0.1–1 s |
 | revisit / warm | 80–100 ms, ~500 KB gzipped |
-| alpine cell (Nauders, 1 300 parcels) cold | ~3–5 s |
+| sparse alpine cell (1 300 parcels) cold | ~3–5 s |
 
 Non-blocking use (`wait=0` / `ServiceOptions.Wait`) hands the client the
 cached part immediately and `ready:false` for the rest; the client retries.
@@ -147,7 +147,7 @@ screen — and keeps (a) the tile cache (expired tiles are deleted hourly,
 their coordinates (`-ttl` 6 h). A parcel can only be obtained by
 asking for a location, a folio only for the part inside a bbox; nothing is
 enumerable or searchable. Every response carries the CC BY notice with year.
-That is the footprint of a browser cache of kataster.bev.gv.at, well inside
+That is the footprint of a browser cache of the BEV web map, well inside
 the VTC licence, and it never touches the Katasterservice JSON API (§76c
 UrhG, not CC BY). The embedded KG→Gemeinde table (names, codes, bboxes,
 areas) is built by `tools/build_admin.sh` from BEV OGD *Verwaltungsgrenzen
@@ -179,7 +179,8 @@ and without `Enrich`).
 
 - **Code**: MIT (see [LICENSE](LICENSE)).
 - **Tiles fetched at runtime**: BEV *Katastralmappe* vector tile cache (VTC),
-  `kataster.bev.gv.at`, **CC BY 4.0**. BEV Nutzungsbedingungen §2.3.3 require
+  **CC BY 4.0** (the tile host is the one the BEV web map uses; see
+  `bevdirect.TileURL`). BEV Nutzungsbedingungen §2.3.3 require
   „© BEV, JJJJ“ on every copy; `Result.Notice` / `X-Data-Attribution` carry
   the string and **must be rendered with the data**. Nothing from the tiles
   is stored in this repository.

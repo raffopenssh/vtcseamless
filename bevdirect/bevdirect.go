@@ -1,6 +1,6 @@
 // Package bevdirect assembles cadastral parcels, building footprints and
 // land-use polygons for a bbox DIRECTLY from the BEV vector tiles
-// (kataster.bev.gv.at, CC BY 4.0). It is the BEV preset of the vtcseamless
+// (Katastralmappe VTC, CC BY 4.0). It is the BEV preset of the vtcseamless
 // tile-stitching engine: tile download + cache, MVT decoding, the gst/nfl
 // layer conventions, enrichment (land-use split, footprint link) and a small
 // cell-cached HTTP service. Expect seconds per viewport instead of

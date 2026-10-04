@@ -6,7 +6,7 @@ package bevdirect
 //
 // State, deliberately minimal:
 //   - the on-disk tile cache (Options.CacheDir) — what a browser of
-//     kataster.bev.gv.at holds;
+//     the BEV web map holds;
 //   - an expiring LRU of assembled cells keyed by sha256(cell coordinates).
 //
 // Nothing is keyed by parcel id, EZ or KG. A parcel can only be obtained by

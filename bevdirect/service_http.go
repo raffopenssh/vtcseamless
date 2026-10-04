@@ -16,7 +16,7 @@ import (
 // Handler exposes the Service over HTTP (what bevdirect-serve runs):
 //
 //	GET /viewport?west&south&east&north[&layers=parcels,footprints,landuse]
-//	GET /parcel/{id}?lon&lat            id = 63349-348/6; resolved from the tiles around lon/lat
+//	GET /parcel/{id}?lon&lat            id = <kg>-<gnr>; resolved from the tiles around lon/lat
 //	GET /ez?kg&ez&lon&lat | &west..     parcels of that folio within the tiles around the location (partial)
 //	GET /municipality?lon&lat           KG of the parcel under the point → Gemeinde (static table)
 //	GET /municipalities?q=              picker

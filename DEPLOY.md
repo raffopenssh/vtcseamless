@@ -1,7 +1,7 @@
 # Deploying bevdirect-serve as a systemd service
 
 `bevdirect-serve` is a single static binary. It needs outbound HTTPS to
-`kataster.bev.gv.at` and nothing else — no database, no credentials, no other
+the BEV tile host (`bevdirect.TileURL`) and nothing else — no database, no credentials, no other
 upstream. The only state is the tile cache and an expiring in-memory cache of
 assembled cells.
 

@@ -24,5 +24,5 @@
 //
 // Everything here is planar lon/lat geometry on orb types; it knows nothing
 // about any particular tile server. Package bevdirect is the preset for the
-// Austrian cadastre tiles (kataster.bev.gv.at) and shows how the pieces fit.
+// Austrian cadastre tile cache and shows how the pieces fit.
 package vtcseamless
