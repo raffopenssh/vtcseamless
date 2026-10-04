@@ -1,0 +1,8 @@
+/dist/
+/bevdirect-serve
+/bevdirect/bevdirect-serve
+/cmd/bevdirect/bevdirect
+/cmd/bevdirect-serve/bevdirect-serve
+/bevcache/
+*.test
+*.prof

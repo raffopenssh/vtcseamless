@@ -1,0 +1,18 @@
+# bevdirect-serve — Austrian cadastre straight from BEV vector tiles (CC BY 4.0).
+# Installed by install.sh into /etc/systemd/system/ (placeholders filled).
+[Unit]
+Description=bevdirect-serve — cadastre assembled live from BEV vector tiles
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=__USER__
+ExecStart=__PREFIX__/bevdirect-serve -addr :__PORT__ -cache __PREFIX__/bevcache -ttl 6h -tile-ttl 24h -cells 160 -max-conns 24
+WorkingDirectory=__PREFIX__
+Restart=always
+RestartSec=3
+MemoryMax=1G
+Environment=GOMEMLIMIT=800MiB
+
+[Install]
+WantedBy=multi-user.target
