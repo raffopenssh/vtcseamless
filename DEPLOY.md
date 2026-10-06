@@ -59,7 +59,7 @@ systemctl restart bevdirect-serve   # state is RAM only; restart is free (cold f
 
 Flags (see `-h`): `-addr`, `-ttl`, `-tile-ttl`, `-tile-cache-mb`, `-cells`,
 `-workers`, `-max-conns`, `-prefetch`. `-cache` is accepted and ignored
-(pre-v0.4 clients still pass it).
+(pre-v0.3.1 clients still pass it).
 
 ## Response contract
 
