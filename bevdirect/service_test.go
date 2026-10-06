@@ -2,7 +2,7 @@ package bevdirect
 
 import (
 	"os"
-	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -67,25 +67,55 @@ func TestComposeDedup(t *testing.T) {
 	}
 }
 
-func TestSweepTileCache(t *testing.T) {
-	dir := t.TempDir()
-	old := filepath.Join(dir, "15", "1")
-	os.MkdirAll(old, 0o755)
-	os.MkdirAll(filepath.Join(dir, "16", "2"), 0o755)
-	os.WriteFile(filepath.Join(old, "7.pbf"), []byte("stale"), 0o644)
-	os.WriteFile(filepath.Join(dir, "16", "2", "9.pbf"), []byte("fresh"), 0o644)
-	os.Chtimes(filepath.Join(old, "7.pbf"), time.Now().Add(-48*time.Hour), time.Now().Add(-48*time.Hour))
-	n, b := SweepTileCache(dir, 24*time.Hour)
-	if n != 1 || b != 5 {
-		t.Fatalf("sweep: %d files %d bytes", n, b)
+func TestTileCacheInMemoryOnly(t *testing.T) {
+	c := NewTileCache(100, time.Hour)
+	c.put("15/1/7", make([]byte, 60))
+	c.put("16/2/9", make([]byte, 30))
+	if _, ok := c.get("15/1/7"); !ok {
+		t.Fatal("miss on cached tile")
 	}
-	if _, err := os.Stat(filepath.Join(dir, "15")); !os.IsNotExist(err) {
-		t.Fatalf("empty z dir should be pruned")
+	c.put("16/2/10", make([]byte, 30)) // 120 > 100 → evicts LRU (16/2/9)
+	if _, ok := c.get("16/2/9"); ok {
+		t.Fatal("LRU eviction did not fire")
 	}
-	if _, err := os.Stat(filepath.Join(dir, "16", "2", "9.pbf")); err != nil {
-		t.Fatalf("fresh tile removed")
+	if st := c.Stats(); st.Tiles != 2 || st.Bytes != 90 || st.MaxBytes != 100 {
+		t.Fatalf("stats %+v", st)
 	}
-	if n, _ := SweepTileCache(dir, 0); n != 0 {
-		t.Fatalf("ttl 0 must keep everything")
+	c.put("15/9/9", make([]byte, 101)) // larger than the whole budget: never stored
+	if st := c.Stats(); st.Tiles != 2 {
+		t.Fatalf("oversized tile stored: %+v", st)
+	}
+	// expiry
+	c.mu.Lock()
+	for _, el := range c.items {
+		el.Value.(*tileEntry).at = time.Now().Add(-2 * time.Hour)
+	}
+	c.mu.Unlock()
+	if n, b := c.Sweep(); n != 2 || b != 90 {
+		t.Fatalf("sweep %d %d", n, b)
+	}
+	var nilc *TileCache
+	if _, ok := nilc.get("x"); ok {
+		t.Fatal("nil cache hit")
+	}
+	nilc.put("x", []byte{1}) // must not panic
+	if NewTileCache(0, time.Hour) != nil {
+		t.Fatal("budget 0 must mean no cache")
+	}
+}
+
+// Nothing in this package may persist tiles: the only on-disk artefact a
+// bevdirect process leaves behind is none.
+func TestNoTileFilesOnDisk(t *testing.T) {
+	for _, f := range []string{"bevdirect.go", "service.go", "service_http.go", "tile_cache.go", "store.go"} {
+		src, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, bad := range []string{"os.WriteFile", "os.Create(", "os.MkdirAll", ".pbf\")"} {
+			if strings.Contains(string(src), bad) {
+				t.Fatalf("%s contains %q — tiles must stay in memory", f, bad)
+			}
+		}
 	}
 }

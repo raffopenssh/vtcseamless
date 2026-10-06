@@ -7,12 +7,12 @@ Wants=network-online.target
 
 [Service]
 User=__USER__
-ExecStart=__PREFIX__/bevdirect-serve -addr :__PORT__ -cache __PREFIX__/bevcache -ttl 6h -tile-ttl 24h -cells 160 -max-conns 24
+ExecStart=__PREFIX__/bevdirect-serve -addr :__PORT__ -ttl 6h -tile-ttl 24h -tile-cache-mb 1024 -cells 160 -max-conns 24
 WorkingDirectory=__PREFIX__
 Restart=always
 RestartSec=3
-MemoryMax=1G
-Environment=GOMEMLIMIT=800MiB
+MemoryMax=3G
+Environment=GOMEMLIMIT=2560MiB
 
 [Install]
 WantedBy=multi-user.target

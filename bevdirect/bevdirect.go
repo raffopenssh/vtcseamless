@@ -21,17 +21,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"golang.org/x/sync/singleflight"
 	"io"
 	"math"
 	"net/http"
-	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/sync/singleflight"
 
 	"github.com/paulmach/orb"
 	"github.com/paulmach/orb/encoding/mvt"
@@ -61,8 +60,7 @@ type Options struct {
 	Layers     []string      // subset of parcels, footprints, landuse; default parcels
 	Workers    int           // parallel tile downloads (default 6; be polite)
 	Timeout    time.Duration // per-tile HTTP timeout (default 20 s)
-	CacheDir   string        // optional on-disk tile cache ({dir}/z/x/y.pbf)
-	CacheTTL   time.Duration // 0 = cache forever (BEV serves Cache-Control: no-cache; 24 h is a sane default)
+	TileCache  *TileCache    // optional in-memory tile cache (NewTileCache); tiles are never written to disk
 	MaxTiles   int           // refuse bboxes needing more tiles (default 64 at z15, i.e. ~30 km²)
 	Decimals   int           // coordinate rounding (default 7)
 	Enrich     bool          // landuse_areas / building_count / footprint shapes + parcel link
@@ -286,14 +284,9 @@ func downloadTile(ctx context.Context, t Tile, opts *Options) ([]byte, bool, err
 }
 
 func downloadTileRaw(ctx context.Context, t Tile, opts *Options) ([]byte, bool, error) {
-	var cachePath string
-	if opts.CacheDir != "" {
-		cachePath = filepath.Join(opts.CacheDir, strconv.Itoa(t.Z), strconv.Itoa(t.X), strconv.Itoa(t.Y)+".pbf")
-		if fi, err := os.Stat(cachePath); err == nil && (opts.CacheTTL == 0 || time.Since(fi.ModTime()) < opts.CacheTTL) {
-			if b, err := os.ReadFile(cachePath); err == nil {
-				return b, true, nil
-			}
-		}
+	cacheKey := fmt.Sprintf("%d/%d/%d", t.Z, t.X, t.Y)
+	if b, ok := opts.TileCache.get(cacheKey); ok {
+		return b, true, nil
 	}
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {
@@ -323,10 +316,7 @@ func downloadTileRaw(ctx context.Context, t Tile, opts *Options) ([]byte, bool, 
 			lastErr = err
 			continue
 		}
-		if cachePath != "" {
-			_ = os.MkdirAll(filepath.Dir(cachePath), 0o755)
-			_ = os.WriteFile(cachePath, b, 0o644)
-		}
+		opts.TileCache.put(cacheKey, b)
 		return b, false, nil
 	}
 	return nil, false, lastErr

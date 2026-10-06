@@ -2,8 +2,8 @@
 
 `bevdirect-serve` is a single static binary. It needs outbound HTTPS to
 the BEV tile host (`bevdirect.TileURL`) and nothing else — no database, no credentials, no other
-upstream. The only state is the tile cache and an expiring in-memory cache of
-assembled cells.
+upstream. The only state is in RAM: a bounded tile cache and an expiring cache
+of assembled cells. **Nothing is written to disk** — no tile files, no database.
 
 ## One-line install
 
@@ -33,22 +33,33 @@ checks `/health`. Override with `PREFIX=`, `PORT=`, `RUN_USER=`.
 
 ## Sizing
 
-2 cores / 1 GB RAM is enough (the unit sets `MemoryMax=1G`; 160 cached cells
-≈ 0.5–1 GB). Disk: the tile cache grows with the area served; 1 GB covers a
-few hundred km². Tiles expire after `-tile-ttl` (unit: 24 h) and are
-**deleted** by an hourly sweeper (`/health` → `tile_cache_swept_at`), so
-nothing stale outlives a day; assembled cells expire after `-ttl` (6 h).
+2 cores / 3 GB RAM (the unit sets `MemoryMax=3G`, `GOMEMLIMIT=2560MiB`):
+160 cached cells ≈ 0.5–1 GB plus the in-memory tile cache, `-tile-cache-mb`
+(unit: 1024). Sizing the tile cache: a dense town is ≈ 450 KB of tiles per km²
+(parcels z15 + footprints/landuse z16), rural land far less; an average KG is
+≈ 11 km², so **1 GiB holds the tiles of roughly 200 KGs of mixed terrain**
+(≈ 100 dense-only). The cache is an LRU — beyond the budget the least recently
+used tiles are refetched, nothing breaks. Tiles expire after `-tile-ttl`
+(24 h) and are dropped by an hourly sweeper (`/health` → `tile_cache`,
+`tile_cache_swept_at`), so nothing stale outlives a day; assembled cells expire
+after `-ttl` (6 h). No disk is used; a restart starts cold.
+
+Batch builders (e.g. `vtcseamless observe` over many KGs, the NE cell
+baseline) only ever read tiles through this process's `/viewport` — keep **one**
+bevdirect-serve running for the whole batch (the unit, or `Server` from the
+Python package started once) so the tiles of neighbouring KGs stay hot.
 
 ## Operating
 
 ```
-curl localhost:8787/health          # cells_cached, prefetch_queue, tile_ttl_s, tile_cache_swept_at, admin_source
+curl localhost:8787/health          # cells_cached, prefetch_queue, tile_cache{tiles,bytes,max_bytes,hits,misses}, admin_source
 ./bevdirect-serve -version          # binary version + admin table edition
-systemctl restart bevdirect-serve   # state is only caches; restart is free (cold first viewport ~10 s)
+systemctl restart bevdirect-serve   # state is RAM only; restart is free (cold first viewport ~10 s)
 ```
 
-Flags (see `-h`): `-addr`, `-cache`, `-ttl`, `-tile-ttl`, `-cells`, `-workers`,
-`-max-conns`, `-prefetch`.
+Flags (see `-h`): `-addr`, `-ttl`, `-tile-ttl`, `-tile-cache-mb`, `-cells`,
+`-workers`, `-max-conns`, `-prefetch`. `-cache` is accepted and ignored
+(pre-v0.4 clients still pass it).
 
 ## Response contract
 

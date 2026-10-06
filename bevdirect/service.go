@@ -5,8 +5,8 @@ package bevdirect
 // bevdirect-serve exposes over HTTP; a Go client can embed it in-process.
 //
 // State, deliberately minimal:
-//   - the on-disk tile cache (Options.CacheDir) — what a browser of
-//     the BEV web map holds;
+//   - a bounded in-memory tile cache (Options.TileCache) — what a browser of
+//     the BEV web map holds; tiles never touch the disk;
 //   - an expiring LRU of assembled cells keyed by sha256(cell coordinates).
 //
 // Nothing is keyed by parcel id, EZ or KG. A parcel can only be obtained by
@@ -16,14 +16,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/fs"
 	"math"
 	"net/http"
-	"os"
-	"path/filepath"
 	"runtime"
-	"sort"
-	"strings"
 	"sync/atomic"
 	"time"
 
@@ -42,16 +37,16 @@ var AllLayers = []string{"parcels", "footprints", "landuse"}
 
 // ServiceOptions configures a Service.
 type ServiceOptions struct {
-	CacheDir  string        // tile cache dir (required for sane performance)
-	TileTTL   time.Duration // default 24 h
-	CellTTL   time.Duration // default 6 h
-	MaxCells  int           // assembled cells kept in memory, ~3–6 MB each (default 64)
-	Workers   int           // parallel tile downloads per cell (default 16)
-	MaxConns  int           // total concurrent connections to BEV (default 24; measured latency is flat up to there)
-	Prefetch  int           // ring of neighbouring cells warmed in the background after a viewport (default 1; 0 = off)
-	Wait      time.Duration // how long a request blocks on cold cells before answering partial + Ready:false (default 20 s)
-	UserAgent string
-	Log       func(format string, args ...any)
+	TileCacheBytes int64         // in-memory raw-tile LRU budget (default 1 GiB ≈ 200 KGs of mixed terrain; <0 = no tile cache)
+	TileTTL        time.Duration // tiles older than this are refetched (default 24 h)
+	CellTTL        time.Duration // default 6 h
+	MaxCells       int           // assembled cells kept in memory, ~3–6 MB each (default 64)
+	Workers        int           // parallel tile downloads per cell (default 16)
+	MaxConns       int           // total concurrent connections to BEV (default 24; measured latency is flat up to there)
+	Prefetch       int           // ring of neighbouring cells warmed in the background after a viewport (default 1; 0 = off)
+	Wait           time.Duration // how long a request blocks on cold cells before answering partial + Ready:false (default 20 s)
+	UserAgent      string
+	Log            func(format string, args ...any)
 }
 
 type Service struct {
@@ -61,6 +56,7 @@ type Service struct {
 	sf      singleflight.Group
 	pre     chan cell
 	active  atomic.Int32 // foreground composes in flight; the prefetcher yields to them
+	tiles   *TileCache
 	sweptAt atomic.Int64
 }
 
@@ -86,78 +82,44 @@ func NewService(o ServiceOptions) *Service {
 	if o.Log == nil {
 		o.Log = func(string, ...any) {}
 	}
+	if o.TileCacheBytes == 0 {
+		o.TileCacheBytes = 1 << 30
+	}
 	s := &Service{o: o, cells: NewStore(o.CellTTL, o.MaxCells), pre: make(chan cell, 256)}
-	s.opts = Options{Layers: AllLayers, Workers: o.Workers, CacheDir: o.CacheDir, CacheTTL: o.TileTTL, Enrich: true,
+	s.tiles = NewTileCache(o.TileCacheBytes, o.TileTTL)
+	s.opts = Options{Layers: AllLayers, Workers: o.Workers, TileCache: s.tiles, Enrich: true,
 		MaxTiles: cellTiles, UserAgent: o.UserAgent, Log: o.Log, HTTPClient: limitedClient(o.MaxConns),
 		assemblyGate: make(chan struct{}, runtime.GOMAXPROCS(0))}
 	if o.Prefetch > 0 {
 		go s.prefetcher()
 		go s.prefetcher()
 	}
-	if o.CacheDir != "" {
+	if s.tiles != nil {
 		go s.tileSweeper()
 	}
 	return s
 }
 
-// tileSweeper deletes tile files older than TileTTL (default 24 h), once at
-// start and then hourly. Without it an expired tile is merely ignored and
-// re-fetched, and the disk cache — and with it stale tiles/ETag-like state —
-// grows forever. BEV's tiles change at most monthly, so the TTL governs how
-// quickly a freshly published cadastre reaches clients.
+// tileSweeper drops expired tiles from the in-memory cache hourly so an idle
+// server does not pin a day-old cadastre in RAM. BEV's tiles change at most
+// monthly, so the TTL governs how quickly a freshly published cadastre reaches
+// clients.
 func (s *Service) tileSweeper() {
 	for {
-		n, b := SweepTileCache(s.o.CacheDir, s.o.TileTTL)
+		n, b := s.tiles.Sweep()
 		if n > 0 {
-			s.o.Log("tile cache sweep: removed %d expired tiles (%.1f MB, ttl %s)", n, float64(b)/1e6, s.o.TileTTL)
+			s.o.Log("tile cache sweep: dropped %d expired tiles (%.1f MB, ttl %s)", n, float64(b)/1e6, s.o.TileTTL)
 		}
 		s.sweptAt.Store(time.Now().Unix())
 		time.Sleep(time.Hour)
 	}
 }
 
-// SweepTileCache removes *.pbf files under dir whose mtime is older than ttl
-// and prunes empty x/ and z/ directories. Returns files removed and bytes freed.
-func SweepTileCache(dir string, ttl time.Duration) (int, int64) {
-	if ttl <= 0 {
-		return 0, 0
-	}
-	cutoff := time.Now().Add(-ttl)
-	n, bytes := 0, int64(0)
-	var dirs []string
-	_ = filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if d.IsDir() {
-			if p != dir {
-				dirs = append(dirs, p)
-			}
-			return nil
-		}
-		if !strings.HasSuffix(p, ".pbf") {
-			return nil
-		}
-		fi, err := d.Info()
-		if err != nil || !fi.ModTime().Before(cutoff) {
-			return nil
-		}
-		if os.Remove(p) == nil {
-			n++
-			bytes += fi.Size()
-		}
-		return nil
-	})
-	// deepest first so emptied x/ dirs let their z/ parent go too
-	sort.Slice(dirs, func(i, j int) bool { return len(dirs[i]) > len(dirs[j]) })
-	for _, d := range dirs {
-		_ = os.Remove(d) // fails (harmlessly) when not empty
-	}
-	return n, bytes
-}
-
 // TileCacheSweptAt is the unix time of the last sweep (0 = none yet), for /health.
 func (s *Service) TileCacheSweptAt() int64 { return s.sweptAt.Load() }
+
+// TileCacheStats reports the in-memory tile cache (tiles, bytes, budget, hit rate).
+func (s *Service) TileCacheStats() TileCacheStats { return s.tiles.Stats() }
 
 // CellsCached / PrefetchQueued are for health endpoints.
 func (s *Service) CellsCached() int    { return s.cells.Len() }

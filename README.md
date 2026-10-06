@@ -51,20 +51,20 @@ this code) and as a self-hosted cadastre service for map clients. See
 [DEPLOY.md](DEPLOY.md) for running it as a systemd service.
 
 ```
-go run ./cmd/bevdirect -bbox W,S,E,N -layers parcels,footprints,landuse -cache ./bevcache -o vp.json
+go run ./cmd/bevdirect -bbox W,S,E,N -layers parcels,footprints,landuse -o vp.json
 go run ./cmd/bevdirect -bbox … -geojson > out.geojson
 ```
 
 ```go
 res, err := bevdirect.Fetch(ctx, west, south, east, north, bevdirect.Options{
-    Layers: []string{"parcels", "footprints"}, CacheDir: "./bevcache", CacheTTL: 24 * time.Hour})
+    Layers: []string{"parcels", "footprints"}, TileCache: bevdirect.NewTileCache(256<<20, 24*time.Hour)})
 // res.Parcels[i] = {parcel_id, kg_code, gnr, ez, rstatus, area_sqm, lon, lat, complete, geometry}
 // res.Notice must be displayed with the data („© BEV, 2026 … CC BY 4.0, bearbeitet“).
 ```
 
 ## Measured (one dense small-town 0.02° × 0.02° viewport tile ≈ 1.5 × 2.2 km)
 
-| | tiles | bytes | cold | warm (disk cache) |
+| | tiles | bytes | cold | warm (in-memory tile cache) |
 |---|---|---|---|---|
 | parcels (z15 `gst`) | 8 | 605 KB | ~1.5 s | 40 ms |
 | + footprints + landuse (z16 `nfl`) | +28 | 1.5 MB | 2.6 s total | 100 ms |
@@ -77,7 +77,12 @@ side (one case: reference 88 m², bevdirect 848 m² = the real ring with its
 hole). bevdirect uses the guarded union for every KG.
 
 BEV serves `Cache-Control: no-cache`, 1.1–1.4 s per tile; parallelism (default
-6) is what makes it tolerable. Be polite: keep `Workers ≤ 8`, use `CacheDir`.
+6) is what makes it tolerable. Be polite: keep `Workers ≤ 8`, share one `TileCache`.
+
+**Tiles never touch the disk.** Raw `.pbf` bytes live only in a bounded,
+TTL-expiring in-memory LRU (`TileCache`; `NewTileCache(maxBytes, ttl)`), so a
+bevdirect process leaves no cadastre artefact behind — nothing to licence,
+back up or clean up. `TestNoTileFilesOnDisk` pins this.
 
 ## How it works (the part that is easy to get wrong)
 
@@ -97,7 +102,7 @@ geometry and `area_sqm` are truncated. Enlarge the bbox or treat as unknown.
 
 ## bevdirect-serve / `bevdirect.Service`
 
-`go build -o bevdirect-serve ./cmd/bevdirect-serve && ./bevdirect-serve -addr :8787 -cache ./bevcache`,
+`go build -o bevdirect-serve ./cmd/bevdirect-serve && ./bevdirect-serve -addr :8787`,
 or `tools/package.sh` → static tarball + `install.sh` (system unit) — see
 **DEPLOY.md**. Or embed it: a Go client calls
 `bevdirect.NewService(...).Viewport(ctx, w,s,e,n)` in-process — no HTTP hop.
@@ -110,7 +115,7 @@ or `tools/package.sh` → static tarball + `install.sh` (system unit) — see
 | `GET /municipality?lon&lat` | KG of the nearest parcel → Gemeinde |
 | `GET /municipalities?q=` | picker; diacritics-insensitive, bbox + centre |
 | `GET /kg/{kg}` | admin row + bbox |
-| `GET /health` | `cells_cached, prefetch_queue, tile_ttl_s, tile_cache_swept_at, admin_source, bevdirect_version` |
+| `GET /health` | `cells_cached, prefetch_queue, tile_ttl_s, tile_cache{tiles,bytes,max_bytes,hits,misses}, tile_cache_swept_at, admin_source, bevdirect_version` |
 
 **How it stays fast without any per-parcel state.** The world is a fixed
 0.02° grid. Each cell is assembled once from its tiles (padded 0.004° so
@@ -120,7 +125,7 @@ click (`/parcel`), a folio (`/ez`) and the background prefetch all compose the
 *same* cells, so a pan hits cells that were warmed by the previous pan: after
 every viewport the ring of neighbouring cells is queued (2 background workers
 that yield to foreground requests). Tile downloads are coalesced process-wide
-(singleflight + disk cache), total BEV connections are capped (24; BEV
+(singleflight + in-memory tile cache), total BEV connections are capped (24; BEV
 latency is flat up to there), and CPU-heavy assembly is gated to one per core
 so the nearest cell finishes first. Enrichment clips land-use pieces to the
 parcel bbox before polyclip and runs parcels in parallel (1.4 s → 0.8 s per
@@ -142,8 +147,8 @@ cached part immediately and `ready:false` for the rest; the client retries.
 **Compliance posture (why cells, and why nothing per parcel).** The service
 holds no database of the cadastre and nothing is keyed by parcel id, EZ or KG.
 It does exactly what the BEV web map does — fetch the tiles for what is on
-screen — and keeps (a) the tile cache (expired tiles are deleted hourly,
-`-tile-ttl` 24 h) and (b) an expiring cache of assembled tile areas keyed by
+screen — and keeps (a) an in-memory tile cache (RAM only, never on disk; LRU
+bounded by `-tile-cache-mb`, expired tiles dropped hourly, `-tile-ttl` 24 h) and (b) an expiring cache of assembled tile areas keyed by
 their coordinates (`-ttl` 6 h). A parcel can only be obtained by
 asking for a location, a folio only for the part inside a bbox; nothing is
 enumerable or searchable. Every response carries the CC BY notice with year.

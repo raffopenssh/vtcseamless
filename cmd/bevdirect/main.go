@@ -24,7 +24,7 @@ func main() {
 	layers := flag.String("layers", "parcels", "comma list: parcels,footprints,landuse")
 	out := flag.String("o", "", "output file (default stdout)")
 	asGeoJSON := flag.Bool("geojson", false, "emit a FeatureCollection instead of the viewport JSON")
-	cache := flag.String("cache", "", "tile cache dir (optional)")
+	_ = flag.String("cache", "", "deprecated, ignored: tiles are never written to disk")
 	workers := flag.Int("workers", 6, "parallel tile downloads")
 	maxTiles := flag.Int("max-tiles", 64, "refuse bboxes needing more z15 tiles")
 	verbose := flag.Bool("v", false, "log tile errors")
@@ -42,7 +42,7 @@ func main() {
 		}
 		f[i] = v
 	}
-	opts := bevdirect.Options{Layers: strings.Split(*layers, ","), Workers: *workers, CacheDir: *cache, CacheTTL: 24 * time.Hour, MaxTiles: *maxTiles}
+	opts := bevdirect.Options{Layers: strings.Split(*layers, ","), Workers: *workers, MaxTiles: *maxTiles}
 	if *verbose {
 		opts.Log = log.Printf
 	}

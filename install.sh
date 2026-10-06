@@ -8,9 +8,7 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 if [ ! -x "$HERE/bevdirect-serve" ]; then
   echo "building bevdirect-serve…"; (cd "$HERE" && CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o bevdirect-serve ./cmd/bevdirect-serve)
 fi
-sudo mkdir -p "$PREFIX/bevcache"
 sudo install -m 755 "$HERE/bevdirect-serve" "$PREFIX/bevdirect-serve"
-sudo chown -R "$RUN_USER" "$PREFIX/bevcache"
 sed -e "s|__PREFIX__|$PREFIX|g" -e "s|__PORT__|$PORT|g" -e "s|__USER__|$RUN_USER|g" \
   "$HERE/bevdirect-serve.service" | sudo tee /etc/systemd/system/bevdirect-serve.service >/dev/null
 sudo systemctl daemon-reload

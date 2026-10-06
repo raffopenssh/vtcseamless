@@ -45,7 +45,7 @@ func (s *Service) Handler() http.Handler {
 		writeJSON(w, 404, map[string]any{"error": "unknown kg"})
 	})
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "cells_cached": s.CellsCached(), "prefetch_queue": s.PrefetchQueued(), "tile_ttl_s": int(s.o.TileTTL.Seconds()), "tile_cache_swept_at": s.TileCacheSweptAt(), "source": "bev-direct", "bevdirect_version": Version, "admin_source": AdminSource(), "notice": Notice()})
+		writeJSON(w, 200, map[string]any{"ok": true, "cells_cached": s.CellsCached(), "prefetch_queue": s.PrefetchQueued(), "tile_ttl_s": int(s.o.TileTTL.Seconds()), "tile_cache_swept_at": s.TileCacheSweptAt(), "tile_cache": s.TileCacheStats(), "source": "bev-direct", "bevdirect_version": Version, "admin_source": AdminSource(), "notice": Notice()})
 	})
 	return gzipCORS(mux)
 }
