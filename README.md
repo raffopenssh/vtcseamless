@@ -97,6 +97,8 @@ decoding and the `gst`/`nfl` layer conventions.
 
 `complete:false` = the parcel touches the edge of the fetched tile set, so
 geometry and `area_sqm` are truncated. Enlarge the bbox or treat as unknown.
+Footprint and landuse pieces carry the same flag (since v0.3.2), computed the
+same way; a seam-merged footprint also lists its tile-scoped `members`.
 `area_sqm` is planar on a local tangent plane with ellipsoidal metres/degree
 (<0.1 %) — a geometric area, not the legally binding Grundstücksdatenbank area.
 
@@ -122,7 +124,12 @@ or `tools/package.sh` → static tarball + `install.sh` (system unit) — see
 parcels crossing the cell edge are complete in at least one cell) and cached
 under `sha256(cell)` for 6 h, LRU-bounded (~3–6 MB per cell). A viewport, a
 click (`/parcel`), a folio (`/ez`) and the background prefetch all compose the
-*same* cells, so a pan hits cells that were warmed by the previous pan: after
+*same* cells; a multi-cell viewport is the union of its single-cell documents
+after dedupe (parcels by id, pieces by `members`/`id`; complete copy wins, then
+larger area — `TestComposeEqualsCellUnion`). Before v0.3.2 a footprint
+straddling a z16 tile edge inside a neighbour's pad came out twice (whole +
+clipped fragment), so builds comparable to aligned per-cell builds had to use
+aligned 0.02° cell requests. They all compose the *same* cells, so a pan hits cells that were warmed by the previous pan: after
 every viewport the ring of neighbouring cells is queued (2 background workers
 that yield to foreground requests). Tile downloads are coalesced process-wide
 (singleflight + in-memory tile cache), total BEV connections are capped (24; BEV

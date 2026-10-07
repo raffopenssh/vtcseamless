@@ -117,13 +117,39 @@ type Parcel struct {
 // Piece is a tile-clipped nfl polygon (footprint or land use). Footprints have
 // no stable id in the tiles; pieces are emitted as-is (seams only where a
 // building straddles a z16 tile edge, ~400 m grid).
+//
+// ID is tile-scoped (`z_x_y#i` = feature i of that tile); a seam-merged
+// footprint keeps the ID of its first member and lists every member id in
+// Members. Complete is computed like Parcel.Complete: false when the piece's
+// bbox touches the edge of the fetched tile set, i.e. the feature may continue
+// in a tile that was not fetched. Service.compose dedups pieces across cells
+// by member id — complete copy wins, then larger area — so a footprint that
+// was merged whole in one cell beats the clipped fragment a neighbouring cell
+// holds under one of the same member ids.
 type Piece struct {
 	ID       string            `json:"id"`
 	NS       int               `json:"ns"`
 	Tile     string            `json:"tile"`
 	AreaSqm  float64           `json:"area_sqm"`
+	Complete bool              `json:"complete"`          // false: touches the edge of the fetched tile set → geometry/area truncated
+	Members  []string          `json:"members,omitempty"` // tile-scoped ids merged into this piece (seam merge only; nil = just ID)
 	Geometry *geojson.Geometry `json:"geometry"`
 	*Shape
+}
+
+// Keys returns the tile-scoped ids this piece stands for (Members, or ID).
+func (p *Piece) Keys() []string {
+	if len(p.Members) > 0 {
+		return p.Members
+	}
+	return []string{p.ID}
+}
+
+// touchesEdge reports whether b reaches the edge of fetched (within edgeEps).
+func touchesEdge(b, fetched orb.Bound) bool {
+	const edgeEps = 1e-7
+	return b.Min[0] <= fetched.Min[0]+edgeEps || b.Max[0] >= fetched.Max[0]-edgeEps ||
+		b.Min[1] <= fetched.Min[1]+edgeEps || b.Max[1] >= fetched.Max[1]-edgeEps
 }
 
 // Result is the assembled viewport.
@@ -216,7 +242,7 @@ func Fetch(ctx context.Context, west, south, east, north float64, opts Options) 
 		res.Parcels = assembleParcels(z15, data, fetched, &opts, &res.Stats)
 	}
 	if want("footprints") || want("landuse") {
-		fp, lu := assembleNFL(z16, data, want("footprints"), want("landuse"), &opts)
+		fp, lu := assembleNFL(z16, data, vtcseamless.TileSetBound(z16), want("footprints"), want("landuse"), &opts)
 		res.Footprints, res.Landuse = fp, lu
 	}
 	if opts.Enrich {
@@ -334,7 +360,6 @@ type parcelGroup struct {
 func assembleParcels(tiles []Tile, data map[Tile][]byte, fetched orb.Bound, opts *Options, st *Stats) []Parcel {
 	groups := map[string]*parcelGroup{}
 	var order []string
-	const edgeEps = 1e-7
 	for _, t := range tiles {
 		raw, ok := data[t]
 		if !ok || len(raw) == 0 {
@@ -372,9 +397,7 @@ func assembleParcels(tiles []Tile, data map[Tile][]byte, fetched orb.Bound, opts
 						if len(piece) == 0 || len(piece[0]) < 4 {
 							continue
 						}
-						pb := piece.Bound()
-						if pb.Min[0] <= fetched.Min[0]+edgeEps || pb.Max[0] >= fetched.Max[0]-edgeEps ||
-							pb.Min[1] <= fetched.Min[1]+edgeEps || pb.Max[1] >= fetched.Max[1]-edgeEps {
+						if touchesEdge(piece.Bound(), fetched) {
 							g.complete = false
 						}
 						g.pieces = append(g.pieces, piece)
@@ -418,7 +441,7 @@ func assembleParcels(tiles []Tile, data map[Tile][]byte, fetched orb.Bound, opts
 
 // ── nfl (footprints ns=41, landuse) @ z16 ───────────────────────────────
 
-func assembleNFL(tiles []Tile, data map[Tile][]byte, wantFP, wantLU bool, opts *Options) (fps, lus []Piece) {
+func assembleNFL(tiles []Tile, data map[Tile][]byte, fetched orb.Bound, wantFP, wantLU bool, opts *Options) (fps, lus []Piece) {
 	for _, t := range tiles {
 		raw, ok := data[t]
 		if !ok || len(raw) == 0 {
@@ -454,7 +477,8 @@ func assembleNFL(tiles []Tile, data map[Tile][]byte, wantFP, wantLU bool, opts *
 					geom = mp[0]
 				}
 				p := Piece{ID: fmt.Sprintf("%s#%d", strings.ReplaceAll(tileKey, "/", "_"), i), NS: ns, Tile: tileKey,
-					AreaSqm: math.Round(vtcseamless.AreaSqm(mp)*10) / 10, Geometry: geojson.NewGeometry(geom)}
+					AreaSqm: math.Round(vtcseamless.AreaSqm(mp)*10) / 10, Complete: !touchesEdge(mp.Bound(), fetched),
+					Geometry: geojson.NewGeometry(geom)}
 				if isFP {
 					fps = append(fps, p)
 				} else {

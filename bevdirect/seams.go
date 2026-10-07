@@ -4,7 +4,8 @@ package bevdirect
 // emitted per z16 tile and a building that straddles a tile edge arrives as
 // two pieces (≈10 % of the buildings in a village: the z16 grid is ~400 m).
 // mergeFootprintSeams hands the pieces to vtcseamless.MergeSeams and rebuilds
-// the merged Piece (id/ns of the first member, tile keys joined with "+").
+// the merged Piece (id/ns of the first member, tile keys joined with "+",
+// Members = every member id, Complete = all members complete).
 
 import (
 	"math"
@@ -38,11 +39,15 @@ func mergeFootprintSeams(fps []Piece, tileOf map[string]Tile, dec int) []Piece {
 			geom = merged[0]
 		}
 		tiles := make([]string, 0, len(g.Members))
+		members := make([]string, 0, len(g.Members))
+		complete := true
 		for _, idx := range g.Members {
 			tiles = append(tiles, fps[idx].Tile)
+			members = append(members, fps[idx].ID)
+			complete = complete && fps[idx].Complete
 		}
 		first := fps[g.Members[0]]
-		out = append(out, Piece{ID: first.ID, NS: first.NS, Tile: strings.Join(tiles, "+"),
+		out = append(out, Piece{ID: first.ID, NS: first.NS, Tile: strings.Join(tiles, "+"), Complete: complete, Members: members,
 			AreaSqm: math.Round(vtcseamless.AreaSqm(merged)*10) / 10, Geometry: geojson.NewGeometry(geom)})
 	}
 	return out

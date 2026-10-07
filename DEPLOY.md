@@ -65,8 +65,8 @@ Flags (see `-h`): `-addr`, `-ttl`, `-tile-ttl`, `-tile-cache-mb`, `-cells`,
 
 `ready:false, pending:true, retry_after_s` on `/viewport?wait=0` means
 *unknown, still assembling* — never "no parcels"; retry after
-`retry_after_s`. `complete:false` on a parcel = truncated at the fetched tile
-edge. Every response carries `notice` / `X-Data-Attribution`
+`retry_after_s`. `complete:false` on a parcel, footprint or landuse piece =
+truncated at the fetched tile edge. Every response carries `notice` / `X-Data-Attribution`
 (`© BEV, <year> … CC BY 4.0, bearbeitet`), which must be shown with the data.
 
 ## Versions
@@ -80,6 +80,17 @@ assembly (seams, union guard) is part of the result.
 - `v0.3.0` — first public release under `github.com/raffopenssh/vtcseamless`;
   cell output identical to the last pre-public build (verified byte-for-byte
   on five viewports, see README).
+- `v0.3.2` — multi-cell `/viewport` no longer emits a clipped duplicate of a
+  footprint that straddles a z16 tile edge inside a neighbour cell's pad
+  (pieces now carry `complete` + `members`; compose dedups by member id,
+  complete copy wins, then larger area). **Single-cell (aligned 0.02°)
+  documents are unchanged apart from the two new fields**, so per-cell
+  `ne_cells` digests from v0.3.0/v0.3.1 still match; only unaligned /
+  multi-cell viewports change (they now equal the union of their cells —
+  Guntrams 23308 viewport `16.1402,47.7068,16.168,47.728`: 431 → 419
+  footprints). Builders that fed unaligned viewports to `ne_cells` must
+  rebuild. Until a peer runs ≥ v0.3.2, feed `ne_cells` only aligned 0.02°
+  cell requests (`west=ix*0.02, south=iy*0.02, +0.02`).
 
 ## Updating the admin table
 

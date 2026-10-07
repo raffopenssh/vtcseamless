@@ -74,7 +74,7 @@ func main() {
 				if p.NS == 41 {
 					layer = "building_footprint"
 				}
-				ft.Properties = geojson.Properties{"layer": layer, "ns": p.NS, "area_sqm": p.AreaSqm, "tile": p.Tile, "attribution": res.Notice}
+				ft.Properties = geojson.Properties{"layer": layer, "ns": p.NS, "area_sqm": p.AreaSqm, "tile": p.Tile, "complete": p.Complete, "attribution": res.Notice}
 				fc.Append(ft)
 			}
 		}

@@ -188,9 +188,17 @@ func (s *Service) fetchCell(ctx context.Context, c cell) (*Result, error) {
 }
 
 // Viewport composes the cells covering bbox and returns the features that
-// intersect it: parcels dedup by id (complete copy wins, then larger area),
-// footprint/landuse pieces dedup by their tile-scoped id. Afterwards the ring
-// of neighbouring cells is queued for background warming.
+// intersect it: parcels dedup by id, footprint/landuse pieces by their
+// tile-scoped member ids (Piece.Keys), both with the same rule — complete copy
+// wins, then larger area. Afterwards the ring of neighbouring cells is queued
+// for background warming.
+//
+// Invariant (TestComposeEqualsCellUnion): a viewport over N×M cells is the
+// union of the N×M single-cell documents after this dedupe. A footprint
+// crossing a z16 tile edge inside a neighbour's 0.004° pad is merged whole in
+// the cell holding both tiles and emitted as a clipped fragment by the cell
+// holding only one; the fragment is Complete:false and shares a member id, so
+// the whole copy wins.
 func (s *Service) Viewport(ctx context.Context, w, so, e, n float64) (*Result, error) {
 	if err := checkBBox(w, so, e, n); err != nil {
 		return nil, err
@@ -239,7 +247,7 @@ func (s *Service) compose(ctx context.Context, w, so, e, n float64) (*Result, er
 		return b.Max[0] >= w && b.Min[0] <= e && b.Max[1] >= so && b.Min[1] <= n
 	}
 	seenP := map[string]int{}
-	seenF, seenL := map[string]bool{}, map[string]bool{}
+	fps, lus := newPieceDedup(), newPieceDedup()
 	for i, r := range results {
 		if errs[i] != nil {
 			if len(cs) == 1 {
@@ -286,19 +294,74 @@ func (s *Service) compose(ctx context.Context, w, so, e, n float64) (*Result, er
 			out.Parcels = append(out.Parcels, *p)
 		}
 		for _, f := range r.Footprints {
-			if !seenF[f.ID] && inBox(f.Geometry.Geometry().Bound()) {
-				seenF[f.ID] = true
-				out.Footprints = append(out.Footprints, f)
+			if f.Geometry != nil && inBox(f.Geometry.Geometry().Bound()) {
+				fps.add(f)
 			}
 		}
 		for _, l := range r.Landuse {
-			if !seenL[l.ID] && inBox(l.Geometry.Geometry().Bound()) {
-				seenL[l.ID] = true
-				out.Landuse = append(out.Landuse, l)
+			if l.Geometry != nil && inBox(l.Geometry.Geometry().Bound()) {
+				lus.add(l)
 			}
 		}
 	}
+	out.Footprints, out.Landuse = fps.result(), lus.result()
 	return out, nil
+}
+
+// pieceDedup merges pieces from several cells by tile-scoped member id. A
+// piece that shares any member id with an already-kept piece is the same
+// feature (or a fragment of it): the complete copy wins, then the larger area,
+// then the earlier one. Keeping a better copy evicts every kept piece it
+// overlaps by id (a whole building may replace two fragments from two cells).
+type pieceDedup struct {
+	kept    []Piece
+	dropped []bool
+	byKey   map[string]int // member id → index into kept
+}
+
+func newPieceDedup() *pieceDedup { return &pieceDedup{byKey: map[string]int{}} }
+
+func pieceBetter(p, q *Piece) bool {
+	if p.Complete != q.Complete {
+		return p.Complete
+	}
+	return p.AreaSqm > q.AreaSqm
+}
+
+func (d *pieceDedup) add(p Piece) {
+	keys := p.Keys()
+	var hits []int
+	for _, k := range keys {
+		if i, ok := d.byKey[k]; ok && !d.dropped[i] {
+			hits = append(hits, i)
+		}
+	}
+	for _, i := range hits {
+		if !pieceBetter(&p, &d.kept[i]) {
+			return // an existing copy is at least as good
+		}
+	}
+	for _, i := range hits {
+		d.dropped[i] = true
+	}
+	d.kept = append(d.kept, p)
+	d.dropped = append(d.dropped, false)
+	for _, k := range keys {
+		d.byKey[k] = len(d.kept) - 1
+	}
+}
+
+func (d *pieceDedup) result() []Piece {
+	if len(d.kept) == 0 {
+		return nil
+	}
+	out := d.kept[:0]
+	for i := range d.kept {
+		if !d.dropped[i] {
+			out = append(out, d.kept[i])
+		}
+	}
+	return out
 }
 
 // ParcelAt resolves id from the tiles around lon/lat. Nil, nil = not there.
