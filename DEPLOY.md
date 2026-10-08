@@ -91,6 +91,18 @@ assembly (seams, union guard) is part of the result.
   footprints). Builders that fed unaligned viewports to `ne_cells` must
   rebuild. Until a peer runs ≥ v0.3.2, feed `ne_cells` only aligned 0.02°
   cell requests (`west=ix*0.02, south=iy*0.02, +0.02`).
+- `v0.3.3` — empty / unrequested layers are `[]`, never `null` (the frozen
+  `ne_cells/canon.py` iterates every layer and crashed on cells without
+  footprints). No geometry change. **`ne_cells`-comparable builds must use
+  aligned 0.02° cells on EVERY version**, including ≥ v0.3.2: a multi-cell
+  `/viewport` is the union of its cells *after* compose's parcel dedupe, which
+  keeps ONE truncated copy of a parcel wider than cell + pad (`complete:false`
+  in every cell — alpine parcels of several km²), whereas `ne_cells` unions all
+  truncated copies from the aligned cells. Measured on 75110 (13 such parcels):
+  0.045° windows lose 3 070 of 168 243 cells and shift 230 + 34 res-10 chunk
+  digests; the operator's `/report` flags such builds `change_suspect:
+  coverage_lossy` (cells_n below the best build seen for the bbox) and does
+  not count their diffs as change.
 
 ## Updating the admin table
 

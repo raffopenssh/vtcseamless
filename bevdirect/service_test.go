@@ -1,6 +1,8 @@
 package bevdirect
 
 import (
+	"encoding/json"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -116,6 +118,25 @@ func TestNoTileFilesOnDisk(t *testing.T) {
 			if strings.Contains(string(src), bad) {
 				t.Fatalf("%s contains %q — tiles must stay in memory", f, bad)
 			}
+		}
+	}
+}
+
+// v0.3.3: a layer that is empty (or not requested) is [] in the JSON body,
+// never null — ne_cells/canon.py iterates every layer unconditionally.
+func TestViewportEmptyLayersAreArrays(t *testing.T) {
+	svc := NewService(ServiceOptions{MaxCells: 4})
+	b := Parcel{ParcelID: "1-2", Complete: true, AreaSqm: 5, Geometry: geojson.NewGeometry(orb.Polygon{{{15.0295, 47.0095}, {15.0305, 47.0095}, {15.0305, 47.0105}, {15.0295, 47.0105}, {15.0295, 47.0095}}})}
+	svc.cells.Put(cell{751, 2350}.key(), &Result{Ready: true, Parcels: []Parcel{b}})
+	rec := httptest.NewRecorder()
+	svc.Handler().ServeHTTP(rec, httptest.NewRequest("GET", "/viewport?west=15.02&south=47.0&east=15.04&north=47.02&layers=parcels&wait=0", nil))
+	var body map[string]json.RawMessage
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err, rec.Body.String())
+	}
+	for _, k := range []string{"parcels", "footprints", "landuse"} {
+		if string(body[k]) == "null" || len(body[k]) == 0 {
+			t.Fatalf("%s is %q, want an array: %s", k, body[k], rec.Body.String())
 		}
 	}
 }

@@ -126,7 +126,10 @@ under `sha256(cell)` for 6 h, LRU-bounded (~3–6 MB per cell). A viewport, a
 click (`/parcel`), a folio (`/ez`) and the background prefetch all compose the
 *same* cells; a multi-cell viewport is the union of its single-cell documents
 after dedupe (parcels by id, pieces by `members`/`id`; complete copy wins, then
-larger area — `TestComposeEqualsCellUnion`). Before v0.3.2 a footprint
+larger area — `TestComposeEqualsCellUnion`). That dedupe keeps one truncated
+copy of a parcel wider than cell + pad, so for `ne_cells` digests (which union
+all truncated copies) only aligned single-cell documents are comparable — on
+every version, see DEPLOY.md v0.3.3. Before v0.3.2 a footprint
 straddling a z16 tile edge inside a neighbour's pad came out twice (whole +
 clipped fragment), so builds comparable to aligned per-cell builds had to use
 aligned 0.02° cell requests. They all compose the *same* cells, so a pan hits cells that were warmed by the previous pan: after

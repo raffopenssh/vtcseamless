@@ -115,6 +115,17 @@ func (s *Service) handleViewport(w http.ResponseWriter, r *http.Request) {
 		res.Landuse = nil
 	}
 	w.Header().Set("X-Data-Attribution", res.Notice)
+	// Empty or unrequested layers are [] (never null): consumers iterate the
+	// layer keys unconditionally (ne_cells/canon.py crashed on null, v0.3.3).
+	if res.Parcels == nil {
+		res.Parcels = []Parcel{}
+	}
+	if res.Footprints == nil {
+		res.Footprints = []Piece{}
+	}
+	if res.Landuse == nil {
+		res.Landuse = []Piece{}
+	}
 	body := map[string]any{
 		"parcels": res.Parcels, "footprints": res.Footprints, "landuse": res.Landuse,
 		"ready": res.Ready, "truncated": false, "count": len(res.Parcels), "source": res.Source,
