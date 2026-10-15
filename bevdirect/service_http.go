@@ -16,6 +16,8 @@ import (
 // Handler exposes the Service over HTTP (what bevdirect-serve runs):
 //
 //	GET /viewport?west&south&east&north[&layers=parcels,footprints,landuse]
+//	    → parcels[], footprints[], landuse[], tiles[{z,x,y,sha256}] (source tiles, v0.3.4),
+//	      stats{tiles_expected, tiles_fetched, tiles_empty, tile_errors, …}
 //	GET /parcel/{id}?lon&lat            id = <kg>-<gnr>; resolved from the tiles around lon/lat
 //	GET /ez?kg&ez&lon&lat | &west..     parcels of that folio within the tiles around the location (partial)
 //	GET /municipality?lon&lat           KG of the parcel under the point → Gemeinde (static table)
@@ -126,8 +128,11 @@ func (s *Service) handleViewport(w http.ResponseWriter, r *http.Request) {
 	if res.Landuse == nil {
 		res.Landuse = []Piece{}
 	}
+	if res.Tiles == nil {
+		res.Tiles = []TileRef{}
+	}
 	body := map[string]any{
-		"parcels": res.Parcels, "footprints": res.Footprints, "landuse": res.Landuse,
+		"parcels": res.Parcels, "footprints": res.Footprints, "landuse": res.Landuse, "tiles": res.Tiles,
 		"ready": res.Ready, "truncated": false, "count": len(res.Parcels), "source": res.Source,
 		"bevdirect_version": Version, "coord_decimals": 7,
 		"notice": res.Notice, "license_url": res.LicenseURL, "fetched_at": res.FetchedAt, "stats": res.Stats,

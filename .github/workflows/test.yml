@@ -1,0 +1,14 @@
+name: tests
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version-file: go.mod }
+      - run: test -z "$(gofmt -l .)"
+      - run: go vet ./...
+      # includes TestAssemblyDeterministic: the same bbox built twice from identical tile
+      # bytes must be byte-identical GeoJSON — the premise of the tile-hash QC downstream
+      - run: go test ./...

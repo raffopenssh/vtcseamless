@@ -117,6 +117,7 @@ or `tools/package.sh` → static tarball + `install.sh` (system unit) — see
 | `GET /municipality?lon&lat` | KG of the nearest parcel → Gemeinde |
 | `GET /municipalities?q=` | picker; diacritics-insensitive, bbox + centre |
 | `GET /kg/{kg}` | admin row + bbox |
+| `GET /viewport` (≥ v0.3.4) | also `tiles[{z,x,y,sha256}]` (source tiles, raw-byte hashes, sorted z/x/y) and `stats.tiles_expected / tiles_fetched / tiles_empty` — provenance for downstream digests, see DEPLOY.md v0.3.4 |
 | `GET /health` | `cells_cached, prefetch_queue, tile_ttl_s, tile_cache{tiles,bytes,max_bytes,hits,misses}, tile_cache_swept_at, admin_source, bevdirect_version` |
 
 **How it stays fast without any per-parcel state.** The world is a fixed

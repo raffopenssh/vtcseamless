@@ -19,6 +19,8 @@ package bevdirect
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -43,8 +45,11 @@ import (
 // Tile is the slippy-map tile coordinate of the engine (re-exported for callers).
 type Tile = vtcseamless.Tile
 
+// TileURL is the BEV tile endpoint (z/x/y printf pattern). A variable only so
+// tests can point it at a fixture server; production never changes it.
+var TileURL = "https://kataster.bev.gv.at/at.gv.bev.kataster/tiles/kataster/%d/%d/%d.pbf"
+
 const (
-	TileURL     = "https://kataster.bev.gv.at/at.gv.bev.kataster/tiles/kataster/%d/%d/%d.pbf"
 	ParcelZoom  = 15 // gst layer
 	SymboleZoom = 16 // nfl layer (footprints ns=41, landuse); BEV max zoom
 	LicenseURL  = "https://creativecommons.org/licenses/by/4.0/"
@@ -152,11 +157,39 @@ func touchesEdge(b, fetched orb.Bound) bool {
 		b.Min[1] <= fetched.Min[1]+edgeEps || b.Max[1] >= fetched.Max[1]-edgeEps
 }
 
+// TileRef names one source tile of a document and the sha256 (hex) of its raw
+// pbf bytes exactly as fetched — before decoding, and for a cached tile the
+// bytes the cache handed out, i.e. what the assembly actually consumed. An
+// empty tile (204/404) hashes the empty string. Together with the per-cell
+// assembly being deterministic (TestAssemblyDeterministic) this is the
+// provenance a downstream digest can be checked against: same tile hashes
+// and a different digest ⇒ pipeline defect, not land-use change.
+type TileRef struct {
+	Z      int    `json:"z"`
+	X      int    `json:"x"`
+	Y      int    `json:"y"`
+	SHA256 string `json:"sha256"`
+}
+
+func tileRefLess(a, b TileRef) bool {
+	if a.Z != b.Z {
+		return a.Z < b.Z
+	}
+	if a.X != b.X {
+		return a.X < b.X
+	}
+	if a.Y != b.Y {
+		return a.Y < b.Y
+	}
+	return a.SHA256 < b.SHA256
+}
+
 // Result is the assembled viewport.
 type Result struct {
 	Parcels    []Parcel  `json:"parcels,omitempty"`
 	Footprints []Piece   `json:"footprints,omitempty"`
 	Landuse    []Piece   `json:"landuse,omitempty"`
+	Tiles      []TileRef `json:"tiles"` // every tile the document was assembled from, sorted (z, x, y); v0.3.4
 	Ready      bool      `json:"ready"`
 	Source     string    `json:"source"`
 	Notice     string    `json:"notice"`
@@ -166,15 +199,18 @@ type Result struct {
 }
 
 type Stats struct {
-	TilesZ15   int           `json:"tiles_z15"`
-	TilesZ16   int           `json:"tiles_z16"`
-	TileErrors int           `json:"tile_errors"`
-	CacheHits  int           `json:"cache_hits"`
-	Bytes      int64         `json:"bytes"`
-	Download   time.Duration `json:"download_ns"`
-	Assembly   time.Duration `json:"assembly_ns"`
-	GuardTrips int           `json:"union_guard_trips"`
-	Pieces     int           `json:"parcel_pieces"`
+	TilesZ15      int           `json:"tiles_z15"`
+	TilesZ16      int           `json:"tiles_z16"`
+	TileErrors    int           `json:"tile_errors"`
+	TilesExpected int           `json:"tiles_expected"` // tiles the bbox needs (z15 + z16); v0.3.4
+	TilesFetched  int           `json:"tiles_fetched"`  // tiles whose bytes are known: HTTP 200, or 204/404 = empty tile (counted in TilesEmpty)
+	TilesEmpty    int           `json:"tiles_empty"`    // of TilesFetched: answered 204/404 (nothing mapped there)
+	CacheHits     int           `json:"cache_hits"`
+	Bytes         int64         `json:"bytes"`
+	Download      time.Duration `json:"download_ns"`
+	Assembly      time.Duration `json:"assembly_ns"`
+	GuardTrips    int           `json:"union_guard_trips"`
+	Pieces        int           `json:"parcel_pieces"`
 }
 
 // Version is the release tag of this bevdirect build ("v0.3.0"); bevdirect-serve
@@ -223,6 +259,20 @@ func Fetch(ctx context.Context, west, south, east, north float64, opts Options) 
 	data, errs := downloadAll(ctx, all, &opts, &res.Stats)
 	res.Stats.Download = time.Since(t0)
 	res.Stats.TileErrors = errs
+	res.Stats.TilesExpected, res.Stats.TilesFetched = len(all), len(data)
+	res.Tiles = make([]TileRef, 0, len(data))
+	for _, t := range all {
+		b, ok := data[t]
+		if !ok {
+			continue
+		}
+		if len(b) == 0 {
+			res.Stats.TilesEmpty++
+		}
+		h := sha256.Sum256(b)
+		res.Tiles = append(res.Tiles, TileRef{Z: t.Z, X: t.X, Y: t.Y, SHA256: hex.EncodeToString(h[:])})
+	}
+	sort.Slice(res.Tiles, func(i, j int) bool { return tileRefLess(res.Tiles[i], res.Tiles[j]) })
 	if errs == len(all) && len(all) > 0 {
 		return nil, errors.New("bevdirect: every tile download failed")
 	}

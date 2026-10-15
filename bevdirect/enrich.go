@@ -160,8 +160,16 @@ func enrichLanduse(p *Parcel, mp orb.MultiPolygon, pieces []lp) {
 			}
 		}
 	}
+	// dominant class: largest area, ties broken by key so the result does not
+	// depend on map iteration order (TestAssemblyDeterministic)
+	keys := make([]string, 0, len(areas))
+	for k := range areas {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
 	best, bestA := "", 0.0
-	for k, v := range areas {
+	for _, k := range keys {
+		v := areas[k]
 		areas[k] = math.Round(v*100) / 100
 		if v > bestA {
 			best, bestA = k, v

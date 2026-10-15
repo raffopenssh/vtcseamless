@@ -103,6 +103,24 @@ assembly (seams, union guard) is part of the result.
   digests; the operator's `/report` flags such builds `change_suspect:
   coverage_lossy` (cells_n below the best build seen for the bbox) and does
   not count their diffs as change.
+- `v0.3.4` — **tile provenance, no assembly change.** Every `/viewport`
+  document gains `tiles: [{z, x, y, sha256}]` — the z15 + z16 kataster tiles
+  the answer was assembled from, sha256 over the raw pbf bytes as fetched
+  (before decoding; a 204/404 tile hashes the empty string), sorted by
+  (z, x, y); a multi-cell viewport lists the union of its cells' tiles. `stats`
+  gains `tiles_expected` (tiles the padded bbox needs), `tiles_fetched` (bytes
+  known: HTTP 200, or 204/404 = empty, counted again in `tiles_empty`); an
+  incomplete fetch is `tiles_fetched < tiles_expected` (and `ready:false`).
+  A cached cell keeps the hashes it was built with — the hash describes the
+  bytes the assembly consumed, never a re-fetch. `TestAssemblyDeterministic`
+  (CI) proves that identical tile bytes give byte-identical documents; the one
+  map-order dependence it found (`dominant_ns` on an exact area tie) is now
+  key-ordered. Geometry, areas, seams and dedupe are untouched: **documents
+  and downstream digests from v0.3.4 are cell-equivalent to v0.3.0–v0.3.3**
+  (the operator treats `bevdirect@*` as one source class). Consumers: a
+  downstream digest that changes while the tile hashes of its cells do not is
+  a pipeline defect, not land-use change; a build with `tiles_fetched <
+  tiles_expected` is never change.
 
 ## Updating the admin table
 

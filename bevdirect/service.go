@@ -19,10 +19,12 @@ import (
 	"math"
 	"net/http"
 	"runtime"
+	"sort"
 	"sync/atomic"
 	"time"
 
 	"github.com/paulmach/orb"
+	"github.com/raffopenssh/vtcseamless"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -248,6 +250,8 @@ func (s *Service) compose(ctx context.Context, w, so, e, n float64) (*Result, er
 	}
 	seenP := map[string]int{}
 	fps, lus := newPieceDedup(), newPieceDedup()
+	seenT := map[TileRef]bool{}
+	expT := map[Tile]bool{}
 	for i, r := range results {
 		if errs[i] != nil {
 			if len(cs) == 1 {
@@ -278,6 +282,24 @@ func (s *Service) compose(ctx context.Context, w, so, e, n float64) (*Result, er
 		if r.FetchedAt.Before(out.FetchedAt) {
 			out.FetchedAt = r.FetchedAt
 		}
+		// provenance: the union of the cells' tiles (a tile shared by two cells
+		// that was fetched twice with different bytes appears twice — both
+		// versions went into the answer); expected = distinct tiles the padded
+		// cells need, fetched = distinct (z,x,y) with known bytes
+		for _, tr := range r.Tiles {
+			if !seenT[tr] {
+				seenT[tr] = true
+				out.Tiles = append(out.Tiles, tr)
+			}
+		}
+		cw, cs, ce, cn := cs[i].bbox()
+		pb := orb.Bound{Min: orb.Point{cw - cellPad, cs - cellPad}, Max: orb.Point{ce + cellPad, cn + cellPad}}
+		for _, t := range vtcseamless.TilesForBound(pb, ParcelZoom) {
+			expT[t] = true
+		}
+		for _, t := range vtcseamless.TilesForBound(pb, SymboleZoom) {
+			expT[t] = true
+		}
 		for j := range r.Parcels {
 			p := &r.Parcels[j]
 			if p.Geometry == nil || !inBox(p.Geometry.Geometry().Bound()) {
@@ -305,8 +327,23 @@ func (s *Service) compose(ctx context.Context, w, so, e, n float64) (*Result, er
 		}
 	}
 	out.Footprints, out.Landuse = fps.result(), lus.result()
+	if out.Tiles == nil {
+		out.Tiles = []TileRef{}
+	}
+	sort.Slice(out.Tiles, func(i, j int) bool { return tileRefLess(out.Tiles[i], out.Tiles[j]) })
+	fetchedT := map[Tile]bool{}
+	for _, tr := range out.Tiles {
+		fetchedT[Tile{Z: tr.Z, X: tr.X, Y: tr.Y}] = true
+		if tr.SHA256 == emptySHA256 {
+			out.Stats.TilesEmpty++
+		}
+	}
+	out.Stats.TilesExpected, out.Stats.TilesFetched = len(expT), len(fetchedT)
 	return out, nil
 }
+
+// emptySHA256 is sha256("") — the hash of a 204/404 tile.
+const emptySHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 
 // pieceDedup merges pieces from several cells by tile-scoped member id. A
 // piece that shares any member id with an already-kept piece is the same
