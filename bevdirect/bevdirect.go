@@ -70,8 +70,9 @@ type Options struct {
 	Decimals   int           // coordinate rounding (default 7)
 	Enrich     bool          // landuse_areas / building_count / footprint shapes + parcel link
 	UserAgent  string
-	HTTPClient *http.Client
+	HTTPClient *http.Client // default: Timeout + NewTransport("") (embedded BEV intermediates, see upstream.go)
 	Log        func(format string, args ...any)
+	Upstream   *Upstream // optional: every tile fetch outcome is reported here (Service → /health)
 
 	assemblyGate chan struct{} // set by Service: bounds concurrent CPU-heavy assemblies
 }
@@ -96,7 +97,7 @@ func (o *Options) defaults() {
 		o.UserAgent = "vtcseamless/" + Version + " (+https://github.com/raffopenssh/vtcseamless)"
 	}
 	if o.HTTPClient == nil {
-		o.HTTPClient = &http.Client{Timeout: o.Timeout}
+		o.HTTPClient = &http.Client{Timeout: o.Timeout, Transport: defaultTransport()}
 	}
 	if o.Log == nil {
 		o.Log = func(string, ...any) {}
@@ -274,6 +275,11 @@ func Fetch(ctx context.Context, west, south, east, north float64, opts Options) 
 	}
 	sort.Slice(res.Tiles, func(i, j int) bool { return tileRefLess(res.Tiles[i], res.Tiles[j]) })
 	if errs == len(all) && len(all) > 0 {
+		if opts.Upstream != nil {
+			if st := opts.Upstream.Status(); st.LastError != "" {
+				return nil, fmt.Errorf("bevdirect: every tile download failed (upstream %s: %s)", st.State, st.LastError)
+			}
+		}
 		return nil, errors.New("bevdirect: every tile download failed")
 	}
 	res.Ready = errs == 0
@@ -378,6 +384,10 @@ func downloadTileRaw(ctx context.Context, t Tile, opts *Options) ([]byte, bool, 
 		resp, err := opts.HTTPClient.Do(req)
 		if err != nil {
 			lastErr = err
+			opts.Upstream.report(err)
+			if ErrKind(err) == "tls" { // retrying a trust failure only burns time
+				break
+			}
 			continue
 		}
 		b, err := io.ReadAll(resp.Body)
@@ -386,16 +396,19 @@ func downloadTileRaw(ctx context.Context, t Tile, opts *Options) ([]byte, bool, 
 		case resp.StatusCode == 404 || resp.StatusCode == 204:
 			b = []byte{} // empty tile (outside Austria / nothing mapped)
 		case resp.StatusCode != 200:
-			lastErr = fmt.Errorf("status %d", resp.StatusCode)
+			lastErr = &statusError{resp.StatusCode}
+			opts.Upstream.report(lastErr)
 			continue
 		case err != nil:
 			lastErr = err
+			opts.Upstream.report(err)
 			continue
 		}
+		opts.Upstream.report(nil)
 		opts.TileCache.put(cacheKey, b)
 		return b, false, nil
 	}
-	return nil, false, lastErr
+	return nil, false, fmt.Errorf("%s: %w", tileHost(), lastErr)
 }
 
 // ── parcels (gst @ z15) ─────────────────────────────────────────────────

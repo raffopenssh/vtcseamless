@@ -47,7 +47,8 @@ func (s *Service) Handler() http.Handler {
 		writeJSON(w, 404, map[string]any{"error": "unknown kg"})
 	})
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "cells_cached": s.CellsCached(), "prefetch_queue": s.PrefetchQueued(), "tile_ttl_s": int(s.o.TileTTL.Seconds()), "tile_cache_swept_at": s.TileCacheSweptAt(), "tile_cache": s.TileCacheStats(), "source": "bev-direct", "bevdirect_version": Version, "admin_source": AdminSource(), "notice": Notice()})
+		up := s.UpstreamStatus()
+		writeJSON(w, 200, map[string]any{"ok": true, "upstream": up, "cells_cached": s.CellsCached(), "prefetch_queue": s.PrefetchQueued(), "tile_ttl_s": int(s.o.TileTTL.Seconds()), "tile_cache_swept_at": s.TileCacheSweptAt(), "tile_cache": s.TileCacheStats(), "source": "bev-direct", "bevdirect_version": Version, "admin_source": AdminSource(), "notice": Notice()})
 	})
 	return gzipCORS(mux)
 }
@@ -104,7 +105,7 @@ func (s *Service) handleViewport(w http.ResponseWriter, r *http.Request) {
 	t0 := time.Now()
 	res, err := s.Viewport(ctx, west, south, east, north)
 	if err != nil {
-		writeJSON(w, 502, map[string]any{"error": err.Error(), "ready": false, "pending": true})
+		writeJSON(w, 502, map[string]any{"error": err.Error(), "ready": false, "pending": true, "upstream": s.UpstreamStatus()})
 		return
 	}
 	if !want["parcels"] {
@@ -140,6 +141,7 @@ func (s *Service) handleViewport(w http.ResponseWriter, r *http.Request) {
 	}
 	if !res.Ready {
 		body["pending"], body["retry_after_s"] = true, 3
+		body["upstream"] = s.UpstreamStatus()
 		w.Header().Set("Retry-After", "3")
 		w.Header().Set("Cache-Control", "no-store")
 	}
@@ -160,7 +162,7 @@ func (s *Service) handleParcel(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	p, err := s.ParcelAt(ctx, id, lon, lat)
 	if err != nil {
-		writeJSON(w, 502, map[string]any{"error": err.Error(), "pending": true})
+		writeJSON(w, 502, map[string]any{"error": err.Error(), "pending": true, "upstream": s.UpstreamStatus()})
 		return
 	}
 	if p == nil {
@@ -187,7 +189,7 @@ func (s *Service) handleEZ(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	parcels, err := s.EZIn(ctx, kg, ez, bw, bs, be, bn)
 	if err != nil {
-		writeJSON(w, 502, map[string]any{"error": err.Error(), "pending": true})
+		writeJSON(w, 502, map[string]any{"error": err.Error(), "pending": true, "upstream": s.UpstreamStatus()})
 		return
 	}
 	total := 0.0
@@ -209,7 +211,7 @@ func (s *Service) handleMunicipality(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	kg, err := s.KGAt(ctx, lon, lat)
 	if err != nil {
-		writeJSON(w, 502, map[string]any{"error": err.Error(), "pending": true})
+		writeJSON(w, 502, map[string]any{"error": err.Error(), "pending": true, "upstream": s.UpstreamStatus()})
 		return
 	}
 	k := KG(kg)

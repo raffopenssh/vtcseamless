@@ -28,6 +28,7 @@ func main() {
 	workers := flag.Int("workers", 16, "parallel BEV tile downloads per cell")
 	conns := flag.Int("max-conns", 24, "total concurrent connections to BEV across all cells")
 	prefetch := flag.Int("prefetch", 1, "ring of neighbouring cells to warm in the background (0 = off)")
+	caBundle := flag.String("ca-bundle", "", "extra PEM file (roots/intermediates) trusted for the BEV tile host; default $BEVDIRECT_CA_BUNDLE. The GEANT TLS RSA 1 intermediate BEV omits is built in")
 	showVer := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
 	bevdirect.Version = version
@@ -43,7 +44,7 @@ func main() {
 		tileBytes = -1
 	}
 	svc := bevdirect.NewService(bevdirect.ServiceOptions{TileCacheBytes: tileBytes, CellTTL: *ttl, TileTTL: *tileTTL, MaxCells: *cells,
-		Workers: *workers, MaxConns: *conns, Prefetch: *prefetch, Log: log.Printf})
+		Workers: *workers, MaxConns: *conns, Prefetch: *prefetch, CABundle: *caBundle, Log: log.Printf})
 	log.Printf("bevdirect-serve %s on %s (tile cache %d MiB in memory, cell ttl %s, tile ttl %s, cells %d; %s)", version, *addr, *tileMB, *ttl, *tileTTL, *cells, bevdirect.AdminSource())
 	log.Fatal(http.ListenAndServe(*addr, svc.Handler()))
 }

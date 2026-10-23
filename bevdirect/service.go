@@ -48,6 +48,7 @@ type ServiceOptions struct {
 	Prefetch       int           // ring of neighbouring cells warmed in the background after a viewport (default 1; 0 = off)
 	Wait           time.Duration // how long a request blocks on cold cells before answering partial + Ready:false (default 20 s)
 	UserAgent      string
+	CABundle       string // extra PEM roots/intermediates for the BEV host (see upstream.go); "" = $BEVDIRECT_CA_BUNDLE
 	Log            func(format string, args ...any)
 }
 
@@ -60,6 +61,7 @@ type Service struct {
 	active  atomic.Int32 // foreground composes in flight; the prefetcher yields to them
 	tiles   *TileCache
 	sweptAt atomic.Int64
+	up      Upstream
 }
 
 func NewService(o ServiceOptions) *Service {
@@ -90,7 +92,7 @@ func NewService(o ServiceOptions) *Service {
 	s := &Service{o: o, cells: NewStore(o.CellTTL, o.MaxCells), pre: make(chan cell, 256)}
 	s.tiles = NewTileCache(o.TileCacheBytes, o.TileTTL)
 	s.opts = Options{Layers: AllLayers, Workers: o.Workers, TileCache: s.tiles, Enrich: true,
-		MaxTiles: cellTiles, UserAgent: o.UserAgent, Log: o.Log, HTTPClient: limitedClient(o.MaxConns),
+		MaxTiles: cellTiles, UserAgent: o.UserAgent, Log: o.Log, HTTPClient: limitedClient(o.MaxConns, o.CABundle, o.Log), Upstream: &s.up,
 		assemblyGate: make(chan struct{}, runtime.GOMAXPROCS(0))}
 	if o.Prefetch > 0 {
 		go s.prefetcher()
@@ -487,9 +489,16 @@ func (s *Service) prefetcher() {
 }
 
 // limitedClient caps total concurrent connections to BEV across all cells.
-func limitedClient(maxConns int) *http.Client {
-	tr := http.DefaultTransport.(*http.Transport).Clone()
+func limitedClient(maxConns int, caBundle string, logf func(string, ...any)) *http.Client {
+	tr, err := NewTransport(caBundle)
+	if err != nil {
+		logf("bevdirect: %v — using system roots + embedded intermediates only", err)
+		tr, _ = NewTransport("")
+	}
 	tr.MaxConnsPerHost = maxConns
 	tr.MaxIdleConnsPerHost = maxConns
 	return &http.Client{Timeout: 20 * time.Second, Transport: tr}
 }
+
+// UpstreamStatus reports whether the BEV tile host is reachable (/health → upstream).
+func (s *Service) UpstreamStatus() UpstreamStatus { return s.up.Status() }
