@@ -349,4 +349,6 @@ func tileHost() string {
 	return s
 }
 
-func pemEncode(der []byte) []byte { return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}) }
+func pemEncode(der []byte) []byte {
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+}
