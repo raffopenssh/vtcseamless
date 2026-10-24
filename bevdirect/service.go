@@ -132,9 +132,21 @@ func (s *Service) PrefetchQueued() int { return len(s.pre) }
 // cell is one square of the fixed world grid.
 type cell struct{ ix, iy int }
 
+// cellOf maps a point to its grid cell. The +cellEps guards IEEE rounding of
+// aligned corners: 15.54/0.02 = 776.999… would floor to 776 and fold the
+// western neighbour into an aligned single-cell request (v0.3.6 fix; before
+// it 1 214 of 18 000 columns tripped and compose kept the neighbour's
+// truncated copy of parcels wider than cell+pad — border rows then differed
+// per requesting cell block).
 func cellOf(lon, lat float64) cell {
-	return cell{int(math.Floor(lon / CellSize)), int(math.Floor(lat / CellSize))}
+	return cell{int(math.Floor(lon/CellSize + cellEps)), int(math.Floor(lat/CellSize + cellEps))}
 }
+
+// cellEps is in cell units (1e-9 cells = 2e-11°, far below the 1e-7° the
+// clients send). cellsFor subtracts 1e-9° from the upper corner, i.e. 5e-8
+// cells, which dominates cellEps so an aligned upper edge stays exclusive.
+const cellEps = 1e-9
+
 func (c cell) bbox() (w, s, e, n float64) {
 	w, s = float64(c.ix)*CellSize, float64(c.iy)*CellSize
 	return w, s, w + CellSize, s + CellSize

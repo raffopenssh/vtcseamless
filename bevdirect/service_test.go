@@ -2,6 +2,7 @@ package bevdirect
 
 import (
 	"encoding/json"
+	"math"
 	"net/http/httptest"
 	"os"
 	"strings"
@@ -137,6 +138,29 @@ func TestViewportEmptyLayersAreArrays(t *testing.T) {
 	for _, k := range []string{"parcels", "footprints", "landuse"} {
 		if string(body[k]) == "null" || len(body[k]) == 0 {
 			t.Fatalf("%s is %q, want an array: %s", k, body[k], rec.Body.String())
+		}
+	}
+}
+
+// TestCellsForAlignedIsSingleCell: an aligned 0.02° request must map to exactly
+// its own cell for every column/row (v0.3.6; 15.54/0.02 floors to 776 without
+// the epsilon and folded the western neighbour in).
+func TestCellsForAlignedIsSingleCell(t *testing.T) {
+	for ix := -9000; ix < 18000; ix++ {
+		iy := ix % 4500
+		w, s := float64(ix)*CellSize, float64(iy)*CellSize
+		cs := cellsFor(w, s, w+CellSize, s+CellSize)
+		if len(cs) != 1 || cs[0] != (cell{ix, iy}) {
+			t.Fatalf("ix=%d iy=%d: cellsFor = %v, want [{%d %d}]", ix, iy, cs, ix, iy)
+		}
+	}
+	// 7-decimal client rounding of the same corners must agree too.
+	for ix := 0; ix < 18000; ix++ {
+		w := math.Round(float64(ix)*CellSize*1e7) / 1e7
+		e := math.Round(float64(ix+1)*CellSize*1e7) / 1e7
+		cs := cellsFor(w, 48.4, e, 48.42)
+		if len(cs) != 1 || cs[0].ix != ix {
+			t.Fatalf("ix=%d (7-dec): cellsFor = %v", ix, cs)
 		}
 	}
 }

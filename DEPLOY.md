@@ -121,6 +121,23 @@ assembly (seams, union guard) is part of the result.
   downstream digest that changes while the tile hashes of its cells do not is
   a pipeline defect, not land-use change; a build with `tiles_fetched <
   tiles_expected` is never change.
+- `v0.3.6` — **aligned-cell lookup fix (srtm-lidar-at report, 2026-10-24).**
+  `cellOf` floored `lon/0.02` without an epsilon, so for 1 214 of 18 000 columns
+  (and as many rows) an exactly aligned request such as
+  `west=15.54 … east=15.56` (15.54/0.02 = 776.999…) resolved to cells 776 AND
+  777. compose then deduped across both ("complete wins, then larger area")
+  and could keep the *neighbour* cell's truncated copy of a parcel wider than
+  cell + pad — truncated inside the requested cell, and which copy won
+  depended on the requester's cell block (12117 parcel 685: area 758 557 m²
+  bbox E 15.5456543 via /viewport vs 719 269 m² / 15.5467808 in the cell's own
+  fetch; `stats.tiles_z15` 30 instead of 12). Downstream `ne_cells` border
+  rows therefore differed per KG (12117 chunk `8a1e33288007fff`: 40 vs 49
+  cells). Fix: `cellOf` adds 1e-9 cell units before flooring;
+  `TestCellsForAlignedIsSingleCell` asserts every aligned request maps to
+  exactly one cell (also after 7-decimal client rounding). **Documents and
+  digests of affected cells change once** (legitimate, not land-use change);
+  unaffected cells are byte-identical. The operator keeps `bevdirect@v0.3.6`
+  in the same source class; its per-chunk rule absorbs the one-time flip.
 
 ## Updating the admin table
 
